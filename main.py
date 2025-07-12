@@ -1,14 +1,22 @@
-from flask import Flask, request
+from flask import Flask, request, jsonify
+from flask import make_response
+from flask_cors import CORS
+from twilio.jwt.access_token import AccessToken
+from twilio.jwt.access_token.grants import ChatGrant
 import openai
 import os
 import gspread
 import json
 from oauth2client.service_account import ServiceAccountCredentials
 from twilio.rest import Client
-import requests
-from requests.auth import HTTPBasicAuth
 
 app = Flask(__name__)
+CORS(app)
+
+# Usuarios válidos del frontend (identity y password)
+usuarios_validos = {
+    "admin": "1234"
+}
 
 # Configura OpenAI
 client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
@@ -267,6 +275,35 @@ def webhook():
 
     return "OK", 200
 
+# Endpoint para generar token de Twilio desde el frontend
+@app.route('/token', methods=['GET'])
+def generar_token():
+    identity = request.args.get('identity')
+    password = request.args.get('password')
+
+    if not identity or not password:
+        response = make_response('Falta identity o password', 400)
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return response
+
+    if identity not in usuarios_validos or usuarios_validos[identity] != password:
+        response = make_response('Credenciales inválidas', 401)
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return response
+
+    account_sid = os.environ['TWILIO_ACCOUNT_SID']
+    api_key_sid = os.environ['TWILIO_API_KEY_SID']
+    api_key_secret = os.environ['TWILIO_API_KEY_SECRET']
+    service_sid = os.environ['TWILIO_CONVERSATION_SERVICE_SID']
+
+    token = AccessToken(account_sid, api_key_sid, api_key_secret, identity=identity)
+    chat_grant = ChatGrant(service_sid=service_sid)
+    token.add_grant(chat_grant)
+
+    jwt = token.to_jwt()
+    response = make_response(jwt)
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
