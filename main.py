@@ -5,6 +5,8 @@ import gspread
 import json
 from oauth2client.service_account import ServiceAccountCredentials
 from twilio.rest import Client
+import requests
+from requests.auth import HTTPBasicAuth
 
 app = Flask(__name__)
 
@@ -16,6 +18,20 @@ twilio_account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
 twilio_auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
 twilio_client = Client(twilio_account_sid, twilio_auth_token)
 
+# Diccionario de imágenes para servicios
+imagenes_servicios = {
+    "Cambio de Aceite": "https://i.ibb.co/xS8M9vPK/CAM-AM.jpg",
+    "Afinación Mayor": "https://i.ibb.co/xS8M9vPK/CAM-AM.jpg",
+    "Servicio de Frenos": "https://i.ibb.co/3gqgSrD/Frenos-Anti-Cong.jpg",
+    "Servicio Anticongelante": "https://i.ibb.co/3gqgSrD/Frenos-Anti-Cong.jpg",
+    "Servicio de Aire Acondicionado": "https://i.ibb.co/JZ1zjqc/Aire-LICUAC.jpg",
+    "Limpieza y Servicio al Cuerpo de Aceleración": "https://i.ibb.co/JZ1zjqc/Aire-LICUAC.jpg",
+    "Servicio de Transmisión Automática con Cedazo": "https://i.ibb.co/F4NVPFRW/Transmision.jpg",
+    "Servicio de Transmisión Automática sin Cedazo": "https://i.ibb.co/F4NVPFRW/Transmision.jpg",
+    "Limpieza de Inyectores": "https://i.ibb.co/7xP0q81s/INYEC.jpg",
+    "Servicio al Sistema de Inyección": "https://i.ibb.co/7xP0q81s/INYEC.jpg",
+}
+
 # Prompt base
 prompt_sistema = """
 Eres un asistente de WhatsApp para el taller Uribe Speed Tune Up. Solo puedes responder si el cliente pregunta por:
@@ -23,7 +39,8 @@ Eres un asistente de WhatsApp para el taller Uribe Speed Tune Up. Solo puedes re
 1. El precio del cambio de aceite (según año, marca, modelo y cilindros del auto)
 2. Los horarios del taller
 3. Las ubicaciones del taller
-4. Qué incluye un servicio del taller
+4. Qué incluye o cuales son los servicios que maneja el taller
+5. Saludos y despedidas
 
 Si el cliente no da todos los datos necesarios para el cambio de aceite (año, marca, modelo y cilindros), pídele los que falten dando seguimiento a la conversación.
 
@@ -44,21 +61,28 @@ Información del taller Uribe Speed Tune Up:
   2. C. Granada 489, Residencial Madrid, 21353 Mexicali, B.C.
 
 - Servicios:
-  - 🔧 Tune Up General: Ajuste completo para que tu motor funcione como nuevo.
-  - 🚦 Cambio de Balatas Generales: Seguridad garantizada con frenos en perfecto estado.
-  - ❄️ Servicio de Anticongelante: Protege tu motor en cualquier clima.
-  - Y más servicios relacionados al mantenimiento preventivo de tu auto.
+  - 🛢️ Cambio de Aceite
+  - 🧰 Afinación mayor
+  - 🚦 Servicio de Frenos
+  - 🦿 Cambio de Amortiguadores
+  - 🌡️ Servicio Anticongelante
+  - ❄️ Servicio de Aire Acondicionado
+  - ⚙️ Limpieza y Servicio al Cuerpo de Aceleración
+  - 🛠️ Servicio de Transmisión Automática con Cedazo
+  - 🔁 Servicio de Transmisión Automática sin Cedazo
+  - 💨 Limpieza de Inyectores
+  - 🧪 Servicio al Sistema de Inyección
 
 Los mensajes que ha escrito el cliente hasta ahora son:
 """
-
 
 # Conexión a Google Sheets
 scope = [
     'https://spreadsheets.google.com/feeds',
     'https://www.googleapis.com/auth/drive'
 ]
-creds = ServiceAccountCredentials.from_json_keyfile_name('credenciales.json', scope)
+creds = ServiceAccountCredentials.from_json_keyfile_name(
+    'credenciales.json', scope)
 gc = gspread.authorize(creds)
 sheet = gc.open_by_key("1oW6ERLY99pOvxLibre54wfPylGb6l_wvEXz0hshBkcw").sheet1
 rows = sheet.get_all_records()
@@ -66,109 +90,183 @@ rows = sheet.get_all_records()
 # Memoria por usuario
 memoria = {}
 
+# Buscar precio en Google Sheets
 def buscar_precio(a, m, mo, c):
     for row in rows:
-        if (str(row['AÑO']).strip() == str(a).strip() and
-            str(row['MARCA']).strip().lower() == str(m).strip().lower() and
-            str(row['MODELO']).strip().lower() == str(mo).strip().lower() and
-            str(row['CILINDROS']).strip() == str(c).strip()):
+        if (str(row['AÑO']).strip() == str(a).strip() and str(
+                row['MARCA']).strip().lower() == str(m).strip().lower() and
+                str(row['MODELO']).strip().lower() == str(mo).strip().lower()
+                and str(row['CILINDROS']).strip() == str(c).strip()):
             sint = row.get('ACEITE SINTETICO PRECIO', 'No disponible')
             semi = row.get('ACEITE SEMISINTETICO PRECIO', 'No disponible')
             return sint, semi
     return None, None
 
+# Enviar mensaje directamente por la API de WhatsApp (no se verá en Flex)
+def enviar_mensaje_whatsapp_directo(numero, texto, mediaUrl=None):
+    try:
+        if mediaUrl:
+            twilio_client.messages.create(
+                from_='whatsapp:+16084708949',
+                to=numero,
+                body=texto,
+                media_url=[mediaUrl]
+            )
+        else:
+            twilio_client.messages.create(
+                from_='whatsapp:+16084708949',
+                to=numero,
+                body=texto
+            )
+        print("Mensaje enviado por WhatsApp API (no visible en Flex)")
+    except Exception as e:
+        print("Error enviando mensaje con WhatsApp API:", e)
+
+
+# Endpoint para recibir mensajes de WhatsApp
 @app.route('/webhook', methods=['POST'])
 def webhook():
     req = request.form.to_dict() or request.json
 
     # No responder a un mensaje enviado por el agente
-    author = req.get('From', '') 
+    author = req.get('From', '')
     if author != '' and not author.startswith("whatsapp:"):
         print("Mensaje del agente, no responde el bot")
         return "Mensaje del agente ignorado", 200
 
     # Datos del mensaje recibidos
     print("Datos recibidos:", req)
-
     mensaje = req.get('Body', '')
     numero = req.get('From', '')
     conversation_sid = req.get('ConversationSid', None)
 
-    # Memoria por usuario de toda la conversación
+    # Memoria por usuario de toda la conversación y bandera de 'En espera de asesor'
     if numero not in memoria:
-        memoria[numero] = []
+        memoria[numero] = {
+            "mensajes": [],
+            "esperando_asesor": False
+        }
 
-    memoria[numero].append({"role": "user", "content": mensaje})
+    memoria[numero]["mensajes"].append({"role": "user", "content": mensaje})
 
     # Respuesta de GPT
+    final = "Tuvimos un problema con tu mensaje. Intenta más tarde o espera a que un asesor te apoye 😊"
     try:
         respuesta_gpt = client.chat.completions.create(
             model="gpt-4o",
             messages=[{
                 "role": "system",
                 "content": prompt_sistema
-            }] + memoria[numero],
-            tools=[{
-                "type": "function",
-                "function": {
-                    "name": "buscar_precio",
-                    "description": "Busca el precio del cambio de aceite en Google Sheets",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "año": {"type": "string"},
-                            "marca": {"type": "string"},
-                            "modelo": {"type": "string"},
-                            "cilindros": {"type": "string"}
-                        },
-                        "required": ["año", "marca", "modelo", "cilindros"]
+            }] + memoria[numero]["mensajes"],
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "buscar_precio",
+                        "description": "Busca el precio del cambio de aceite en Google Sheets",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "año": {"type": "string"},
+                                "marca": {"type": "string"},
+                                "modelo": {"type": "string"},
+                                "cilindros": {"type": "string"}
+                            },
+                            "required": ["año", "marca", "modelo", "cilindros"]
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "detectar_servicio",
+                        "description": "Detecta si el usuario quiere saber qué incluye un servicio específico",
+                        "parameters": {
+                          "type": "object",
+                          "properties": {
+                            "servicio": {
+                              "type": "string",
+                              "description": "Nombre exacto del servicio que el usuario quiere conocer",
+                              "enum": [
+                                  "Cambio de Aceite",
+                                  "Afinación Mayor",
+                                  "Servicio de Frenos",
+                                  "Servicio Anticongelante",
+                                  "Servicio de Aire Acondicionado",
+                                  "Limpieza y Servicio al Cuerpo de Aceleración",
+                                  "Servicio de Transmisión Automática con Cedazo",
+                                  "Servicio de Transmisión Automática sin Cedazo",
+                                  "Limpieza de Inyectores",
+                                  "Servicio al Sistema de Inyección"
+                              ]
+                            }
+                          },
+                          "required": ["servicio"]
+                        }
                     }
                 }
-            }],
+            ],
             tool_choice="auto"
         )
 
         mensaje_gpt = respuesta_gpt.choices[0].message
 
-        # Si GPT tiene todos los datos busca el precio en sheets y responde
+        # Si GPT activó una función...
         if mensaje_gpt.tool_calls:
-            argumentos = json.loads(mensaje_gpt.tool_calls[0].function.arguments)
-            sint, semi = buscar_precio(
-                str(argumentos['año']),
-                str(argumentos['marca']).lower(),
-                str(argumentos['modelo']).lower(),
-                str(argumentos['cilindros'])
-            )
-            if sint and semi:
-                final = (
-                    f"El cambio de aceite para tu {argumentos['marca'].title()} {argumentos['modelo'].title()} {argumentos['año']} "
-                    f"({argumentos['cilindros']} cilindros), cuesta:\n\n"
-                    f"🔧 Sintético: {sint}\n"
-                    f"🔧 Semisintético: {semi}\n\n"
-                    f"Puedes venir sin necesidad de cita y te atendemos al instante 🏎️ 💨"
+            tool_call = mensaje_gpt.tool_calls[0]
+            argumentos = json.loads(tool_call.function.arguments)
+
+            if tool_call.function.name == "buscar_precio":
+                sint, semi = buscar_precio(
+                    str(argumentos['año']),
+                    str(argumentos['marca']).lower(),
+                    str(argumentos['modelo']).lower(),
+                    str(argumentos['cilindros'])
                 )
-                memoria[numero] = []  # Borra historial después de cotizar
-            else:
-                final = "No encontré ese vehículo en mi base de datos 🚗. Un asesor te ayudará pronto 👨‍🔧"
-                memoria[numero] = []
+                if sint and semi:
+                    final = (
+                        f"El cambio de aceite para tu {argumentos['marca'].title()} {argumentos['modelo'].title()} {argumentos['año']} "
+                        f"({argumentos['cilindros']} cilindros), cuesta:\n\n"
+                        f"🔧 Sintético: {sint}\n"
+                        f"🔧 Semisintético: {semi}\n\n"
+                        f"Puedes venir sin necesidad de cita y te atendemos al instante 🏎️ 💨. Si prefieres agendar, también se puede 😉"
+                    )
+                else:
+                    final = "No encontré ese vehículo en mi base de datos 🚗. Un asesor te ayudará pronto 👨‍🔧"
+
+                memoria[numero]["mensajes"] = [] # Se borra memoria tras cotizar
+
+            elif tool_call.function.name == "detectar_servicio":
+                servicio = argumentos["servicio"]
+                url_imagen = imagenes_servicios.get(servicio)
+
+                if url_imagen:
+                    enviar_mensaje_whatsapp_directo(numero, f"Esto es lo que incluye el {servicio} 👆", url_imagen)
+                    memoria[numero]["mensajes"] = []
+                    return "OK", 200  # Ya se mandó por WhatsApp API
+                else:
+                    final = "No encontré ese servicio en mi catálogo. Un asesor te apoyará pronto 👨‍🔧"
+                memoria[numero]["mensajes"] = []
         else:
             final = mensaje_gpt.content
-            memoria[numero].append({"role": "assistant", "content": final})
+            memoria[numero]["mensajes"].append({"role": "assistant", "content": final})
 
     except Exception as e:
         print("Error:", e)
         final = "Tuvimos un problema con tu mensaje. Intenta más tarde o espera a que un asesor te apoye 😊"
-        memoria[numero] = []
+        memoria[numero]["mensajes"] = []
 
     # Envía la respuesta usando Conversations API para que se vea en Flex
     if conversation_sid:
-        twilio_client.conversations.v1.conversations(conversation_sid).messages.create(
-            body=final
-        )
+        twilio_client.conversations.v1.conversations(
+            conversation_sid).messages.create(body=final)
     else:
-        print("No se recibió ConversationSid, no se pudo enviar respuesta con Conversations API")
+        print(
+            "No se recibió ConversationSid, no se pudo enviar respuesta con Conversations API"
+        )
 
     return "OK", 200
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
