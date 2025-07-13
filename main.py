@@ -14,11 +14,6 @@ from datetime import datetime
 app = Flask(__name__)
 CORS(app)
 
-# Usuarios válidos del frontend (identity y password)
-usuarios_validos = {
-    "admin": "1234"
-}
-
 # Configura OpenAI
 client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
