@@ -284,6 +284,17 @@ def webhook():
             print("❌ No se pudo obtener ni crear conversación")
             return "Error creando conversación", 500
 
+        # Guardar manualmente el primer mensaje del cliente en la conversación
+        try:
+            twilio_client.conversations \
+                .v1 \
+                .conversations(conversation_sid) \
+                .messages \
+                .create(author=numero, body=mensaje)
+            print(f"📥 Primer mensaje del cliente guardado en conversación {conversation_sid}")
+        except Exception as e:
+            print(f"❌ Error guardando primer mensaje del cliente: {e}")
+
     # Inicializar memoria si no existe
     if numero not in memoria:
         memoria[numero] = {
