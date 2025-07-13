@@ -9,6 +9,7 @@ import gspread
 import json
 from oauth2client.service_account import ServiceAccountCredentials
 from twilio.rest import Client
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
@@ -25,6 +26,12 @@ client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 twilio_account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
 twilio_auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
 twilio_client = Client(twilio_account_sid, twilio_auth_token)
+
+# Usuarios permitidos en el Inbox webapp (identity)
+usuarios_permitidos = [
+    "Pedro Librado",
+    "Joan Pedro"
+]
 
 # Diccionario de imágenes para servicios
 imagenes_servicios = {
@@ -60,8 +67,8 @@ Siempre responde en español, de manera clara, amable y humana. Puedes utilizar 
 Información del taller Uribe Speed Tune Up:
 
 - Horarios:
-  - Lunes a viernes: 8 a.m.–6 p.m.
-  - Sábado: 8 a.m.–3 p.m.
+  - Lunes a viernes: 8 a.m.–6 p.m.
+  - Sábado: 8 a.m.–3 p.m.
   - Domingo: Cerrado.
 
 - Ubicaciones:
@@ -130,25 +137,159 @@ def enviar_mensaje_whatsapp_directo(numero, texto, mediaUrl=None):
     except Exception as e:
         print("Error enviando mensaje con WhatsApp API:", e)
 
+# Normalizar número de teléfono
+def normalizar_numero(numero):
+    """Normaliza el número de teléfono para usarlo como friendly_name"""
+    if numero.startswith("whatsapp:"):
+        return numero
+    return f"whatsapp:{numero}"
+
+# Buscar conversación existente por número de teléfono
+def buscar_conversacion_existente(numero_whatsapp):
+    """Busca una conversación existente usando el número como friendly_name"""
+    try:
+        numero_normalizado = normalizar_numero(numero_whatsapp)
+        conversaciones = twilio_client.conversations.v1.conversations.list(limit=100)
+
+        for conv in conversaciones:
+            if conv.friendly_name == numero_normalizado:
+                print(f"✅ Conversación encontrada: {conv.sid} para {numero_normalizado}")
+                return conv.sid
+
+        print(f"❌ No se encontró conversación para {numero_normalizado}")
+        return None
+    except Exception as e:
+        print(f"Error buscando conversación existente: {e}")
+        return None
+
+# Verificar si un participante ya existe en la conversación
+def participante_existe(conversation_sid, identity=None, address=None):
+    """Verifica si un participante ya existe en la conversación"""
+    try:
+        participantes = twilio_client.conversations.v1.conversations(conversation_sid).participants.list()
+
+        for participante in participantes:
+            if identity and participante.identity == identity:
+                return True
+            if address and participante.messaging_binding and participante.messaging_binding.get('address') == address:
+                return True
+
+        return False
+    except Exception as e:
+        print(f"Error verificando participante: {e}")
+        return False
+
+# Agregar usuarios permitidos a la conversación
+def agregar_usuarios_permitidos(conversation_sid):
+    """Agrega todos los usuarios permitidos a la conversación si no están ya"""
+    for usuario in usuarios_permitidos:
+        try:
+            if not participante_existe(conversation_sid, identity=usuario):
+                twilio_client.conversations.v1.conversations(conversation_sid).participants.create(
+                    identity=usuario
+                )
+                print(f"✅ Usuario {usuario} agregado a la conversación {conversation_sid}")
+            else:
+                print(f"👤 Usuario {usuario} ya existe en la conversación {conversation_sid}")
+        except Exception as e:
+            print(f"❌ Error agregando usuario {usuario}: {e}")
+
+# Crear conversación única para un número
+def crear_conversacion_unica(numero_whatsapp):
+    """Crea una nueva conversación única para el número de teléfono"""
+    try:
+        numero_normalizado = normalizar_numero(numero_whatsapp)
+
+        # Crear la conversación con el número como friendly_name
+        conversacion = twilio_client.conversations.v1.conversations.create(
+            friendly_name=numero_normalizado
+        )
+
+        print(f"✅ Nueva conversación creada: {conversacion.sid} para {numero_normalizado}")
+
+        # Agregar el participante de WhatsApp
+        try:
+            twilio_client.conversations.v1.conversations(conversacion.sid).participants.create(
+                messaging_binding_address=numero_normalizado,
+                messaging_binding_proxy_address=os.environ.get("TWILIO_WHATSAPP_NUMBER")
+            )
+            print(f"✅ Participante WhatsApp agregado: {numero_normalizado}")
+        except Exception as e:
+            print(f"❌ Error agregando participante WhatsApp: {e}")
+
+        # Agregar usuarios permitidos
+        agregar_usuarios_permitidos(conversacion.sid)
+
+        return conversacion.sid
+    except Exception as e:
+        print(f"❌ Error creando conversación para {numero_whatsapp}: {e}")
+        return None
+
+# Obtener o crear conversación única
+def obtener_o_crear_conversacion_unica(numero_whatsapp):
+    """Obtiene una conversación existente o crea una nueva única para el número"""
+    numero_normalizado = normalizar_numero(numero_whatsapp)
+
+    # Buscar conversación existente
+    conversation_sid = buscar_conversacion_existente(numero_normalizado)
+
+    if conversation_sid:
+        # Asegurarse de que los usuarios permitidos estén en la conversación
+        agregar_usuarios_permitidos(conversation_sid)
+        return conversation_sid
+
+    # No existe, crear una nueva
+    return crear_conversacion_unica(numero_normalizado)
+
+# Limpiar conversaciones antiguas
+def limpiar_conversaciones_antiguas(max_conversaciones=90, conservar=50):
+    try:
+        conversaciones = twilio_client.conversations.v1.conversations.list(limit=200)
+        if len(conversaciones) <= max_conversaciones:
+            return
+
+        # Reemplazar None por una fecha antigua (para que se vayan al principio al ordenar)
+        conversaciones_ordenadas = sorted(
+            conversaciones,
+            key=lambda c: c.date_created or datetime(2000, 1, 1)
+        )
+
+        a_borrar = conversaciones_ordenadas[:len(conversaciones) - conservar]
+
+        for conv in a_borrar:
+            try:
+                twilio_client.conversations.v1.conversations(conv.sid).delete()
+                print(f"🗑️ Conversación {conv.sid} eliminada")
+            except Exception as e:
+                print(f"❌ No se pudo eliminar conversación {conv.sid}: {e}")
+
+    except Exception as e:
+        print(f"Error al limpiar conversaciones: {e}")
 
 # Endpoint para recibir mensajes de WhatsApp
 @app.route('/webhook', methods=['POST'])
 def webhook():
     req = request.form.to_dict() or request.json
 
-    # No responder a un mensaje enviado por el agente
     author = req.get('From', '')
     if author != '' and not author.startswith("whatsapp:"):
         print("Mensaje del agente, no responde el bot")
         return "Mensaje del agente ignorado", 200
 
-    # Datos del mensaje recibidos
-    print("Datos recibidos:", req)
     mensaje = req.get('Body', '')
     numero = req.get('From', '')
     conversation_sid = req.get('ConversationSid', None)
 
-    # Memoria por usuario de toda la conversación y bandera de 'En espera de asesor'
+    print(f"📨 Mensaje recibido de {numero}: {mensaje}")
+
+    # Si no hay ConversationSid, obtener o crear conversación única
+    if not conversation_sid:
+        conversation_sid = obtener_o_crear_conversacion_unica(numero)
+        if not conversation_sid:
+            print("❌ No se pudo obtener ni crear conversación")
+            return "Error creando conversación", 500
+
+    # Inicializar memoria si no existe
     if numero not in memoria:
         memoria[numero] = {
             "mensajes": [],
@@ -157,15 +298,12 @@ def webhook():
 
     memoria[numero]["mensajes"].append({"role": "user", "content": mensaje})
 
-    # Respuesta de GPT
     final = "Tuvimos un problema con tu mensaje. Intenta más tarde o espera a que un asesor te apoye 😊"
+
     try:
         respuesta_gpt = client.chat.completions.create(
             model="gpt-4o",
-            messages=[{
-                "role": "system",
-                "content": prompt_sistema
-            }] + memoria[numero]["mensajes"],
+            messages=[{"role": "system", "content": prompt_sistema}] + memoria[numero]["mensajes"],
             tools=[
                 {
                     "type": "function",
@@ -219,7 +357,6 @@ def webhook():
 
         mensaje_gpt = respuesta_gpt.choices[0].message
 
-        # Si GPT activó una función...
         if mensaje_gpt.tool_calls:
             tool_call = mensaje_gpt.tool_calls[0]
             argumentos = json.loads(tool_call.function.arguments)
@@ -241,37 +378,34 @@ def webhook():
                     )
                 else:
                     final = "No encontré ese vehículo en mi base de datos 🚗. Un asesor te ayudará pronto 👨‍🔧"
-
-                memoria[numero]["mensajes"] = [] # Se borra memoria tras cotizar
+                memoria[numero]["mensajes"] = []
 
             elif tool_call.function.name == "detectar_servicio":
                 servicio = argumentos["servicio"]
                 url_imagen = imagenes_servicios.get(servicio)
-
                 if url_imagen:
                     enviar_mensaje_whatsapp_directo(numero, f"Esto es lo que incluye el {servicio} 👆", url_imagen)
                     memoria[numero]["mensajes"] = []
-                    return "OK", 200  # Ya se mandó por WhatsApp API
+                    return "OK", 200
                 else:
                     final = "No encontré ese servicio en mi catálogo. Un asesor te apoyará pronto 👨‍🔧"
                 memoria[numero]["mensajes"] = []
+
         else:
             final = mensaje_gpt.content
             memoria[numero]["mensajes"].append({"role": "assistant", "content": final})
 
     except Exception as e:
-        print("Error:", e)
+        print(f"❌ Error procesando mensaje: {e}")
         final = "Tuvimos un problema con tu mensaje. Intenta más tarde o espera a que un asesor te apoye 😊"
         memoria[numero]["mensajes"] = []
 
-    # Envía la respuesta usando Conversations API para que se vea en Flex
-    if conversation_sid:
-        twilio_client.conversations.v1.conversations(
-            conversation_sid).messages.create(body=final)
-    else:
-        print(
-            "No se recibió ConversationSid, no se pudo enviar respuesta con Conversations API"
-        )
+    # Enviar respuesta a través de Twilio Conversations
+    try:
+        twilio_client.conversations.v1.conversations(conversation_sid).messages.create(body=final)
+        print(f"✅ Respuesta enviada a conversación {conversation_sid}")
+    except Exception as e:
+        print(f"❌ Error enviando respuesta: {e}")
 
     return "OK", 200
 
@@ -279,17 +413,12 @@ def webhook():
 @app.route('/token', methods=['GET'])
 def generar_token():
     identity = request.args.get('identity')
-    password = request.args.get('password')
 
-    if not identity or not password:
-        response = make_response('Falta identity o password', 400)
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        return response
+    if not identity:
+        return make_response('Falta identity', 400)
 
-    if identity not in usuarios_validos or usuarios_validos[identity] != password:
-        response = make_response('Credenciales inválidas', 401)
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        return response
+    if identity not in usuarios_permitidos:
+        return make_response('Usuario no autorizado', 403)
 
     account_sid = os.environ['TWILIO_ACCOUNT_SID']
     api_key_sid = os.environ['TWILIO_API_KEY_SID']
@@ -301,9 +430,7 @@ def generar_token():
     token.add_grant(chat_grant)
 
     jwt = token.to_jwt()
-    response = make_response(jwt)
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    return response
+    return make_response(jwt, 200)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
