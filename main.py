@@ -50,7 +50,7 @@ Eres un asistente de WhatsApp para el taller Uribe Speed Tune Up. Solo puedes re
 1. El precio del cambio de aceite (según año, marca, modelo y cilindros del auto)
 2. Los horarios del taller
 3. Las ubicaciones del taller
-4. Qué incluye o cuáles son los servicios que maneja el taller
+4. Cuáles son los servicios que maneja el taller y que incluye cada uno o mas informacion de cada servicio
 5. Saludos y despedidas
 
 Cuando un cliente pide precio de cambio de aceite, necesitas que proporcione estos 4 datos: **año, marca, modelo y cilindros**.  
@@ -169,20 +169,13 @@ def agregar_usuarios_permitidos(conversation_sid):
             print(f"❌ Error agregando usuario {usuario}: {e}")
 
 # Enviar mensaje como Bot Uribe Speed
-def enviar_mensaje_como_bot(conversation_sid, mensaje, mediaUrl=None):
+def enviar_mensaje_como_bot(conversation_sid, mensaje):
     """Envía un mensaje como el Bot Uribe Speed en la conversación"""
     try:
-        if mediaUrl:
-            twilio_client.conversations.v1.services(service_sid).conversations(conversation_sid).messages.create(
-                author="Bot Uribe Speed",
-                body=mensaje,
-                media_url=mediaUrl
-            )
-        else:
-            twilio_client.conversations.v1.services(service_sid).conversations(conversation_sid).messages.create(
-                author="Bot Uribe Speed",
-                body=mensaje
-            )
+        twilio_client.conversations.v1.services(service_sid).conversations(conversation_sid).messages.create(
+            author="Bot Uribe Speed",
+            body=mensaje
+        )
         print(f"✅ Mensaje enviado como Bot Uribe Speed a conversación {conversation_sid}")
         return True
     except Exception as e:
@@ -214,15 +207,14 @@ def enviar_mensaje_whatsapp_directo(numero, texto, mediaUrl=None):
 def webhook():
     req = request.form.to_dict() or request.json
 
-    autor = req.get('Author', '')
+    numero = req.get('Author', '')
     mensaje = req.get('Body', '')
-    numero = req.get('From', '')
     conversation_sid = req.get('ConversationSid', None)
 
-    print(f"📨 Mensaje recibido de {numero} (autor: {autor}): {mensaje}")
+    print(f"📨 Mensaje recibido de {numero} (autor: {numero}): {mensaje}")
 
     # Si el mensaje viene de un agente o del bot, ignorar
-    if autor and autor != '' and autor in usuarios_permitidos:
+    if numero and numero in usuarios_permitidos:
         print("Mensaje del agente/bot, no responde el bot")
         return "Mensaje del agente ignorado", 200
 
@@ -345,7 +337,7 @@ def webhook():
                 url_imagen = imagenes_servicios.get(servicio)
                 if url_imagen:
                     # Enviar imagen como Bot Uribe Speed
-                    enviar_mensaje_como_bot(conversation_sid, f"Esto es lo que incluye el {servicio} 👆", url_imagen)
+                    enviar_mensaje_whatsapp_directo(numero, f"Esto es lo que incluye el {servicio} 👆", url_imagen)
                     memoria[numero]["mensajes"] = []
                     return "OK", 200
                 else:
