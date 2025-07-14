@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request
 from flask import make_response
 from flask_cors import CORS
 from twilio.jwt.access_token import AccessToken

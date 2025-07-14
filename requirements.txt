@@ -1,9 +1,6 @@
 flask
+flask-cors
+twilio
 openai
 gspread
 oauth2client
-python-dotenv
-twilio
-requests
-flask-cors
-flask_limiter
