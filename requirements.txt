@@ -6,3 +6,4 @@ python-dotenv
 twilio
 requests
 flask-cors
+flask_limiter
