@@ -1,7 +1,7 @@
 [project]
-name = "python-template"
-version = "0.1.0"
-description = ""
-authors = ["Your Name <you@example.com>"]
+name = "WhatsappAI-UribeSpeed"
+version = "1.0.0"
+description = "Bot de atención automatizada para taller mecánico usando Flask, Twilio Conversations, OpenAI y Google Sheets"
+authors = ["Pedro Librado Uribe Reyes <libradouribe25@gmail.com>"]
 requires-python = ">=3.11"
 dependencies = []
