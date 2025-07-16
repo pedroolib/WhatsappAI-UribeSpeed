@@ -327,7 +327,6 @@ def webhook():
                     )
                 else:
                     final = "No encontré ese vehículo en mi base de datos 🚗. Un asesor te ayudará pronto 👨‍🔧"
-                memoria[numero]["mensajes"] = []
 
             elif tool_call.function.name == "detectar_servicio":
                 servicio = argumentos["servicio"]
@@ -335,11 +334,9 @@ def webhook():
                 if url_imagen:
                     # Enviar imagen como Bot Uribe Speed
                     enviar_mensaje_whatsapp_directo(numero, f"Esto es lo que incluye el {servicio} 👆", url_imagen)
-                    memoria[numero]["mensajes"] = []
                     return "OK", 200
                 else:
                     final = "No encontré ese servicio en mi catálogo. Un asesor te apoyará pronto 👨‍🔧"
-                memoria[numero]["mensajes"] = []
 
         else:
             final = mensaje_gpt.content
@@ -348,7 +345,6 @@ def webhook():
     except Exception as e:
         print(f"❌ Error procesando mensaje: {e}")
         final = "Tuvimos un problema con tu mensaje. Intenta más tarde o espera a que un asesor te apoye 😊"
-        memoria[numero]["mensajes"] = []
 
     # Enviar respuesta como Bot Uribe Speed
     enviar_mensaje_como_bot(conversation_sid, final)
