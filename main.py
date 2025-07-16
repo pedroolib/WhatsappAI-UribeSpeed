@@ -55,6 +55,14 @@ Eres un asistente de WhatsApp para el taller Uribe Speed Tune Up. Solo puedes re
 3. Las ubicaciones del taller
 4. Cuáles son los servicios que maneja el taller y que incluye cada uno o mas informacion de cada servicio
 5. Saludos y despedidas
+6. Si el cliente quiere agendar una cita
+
+Cuando un cliente quiere agendar una cita, pídele los siguientes datos:
+- Su nombre completo
+- Fecha en la que quiere la cita
+- La hora aproximada que desea
+- Servicio que desea (solo si no está claro por el contexto de la conversación)
+Si el cliente vuelve a preguntar por otro servicio después de que ya se mostró uno, cambia el contexto y responde del nuevo servicio mencionado.
 
 Cuando un cliente pide precio de cambio de aceite, necesitas que proporcione estos 4 datos: **año, marca, modelo y cilindros**.  
 **Ignora versiones del modelo** (como "EX", "Sport", "Advance", etc.). Solo considera la marca (como Honda, Nissan) y el modelo principal (como Civic, Sentra).  
@@ -323,7 +331,7 @@ def webhook():
                         f"({argumentos['cilindros']} cilindros), cuesta:\n\n"
                         f"🔧 Sintético: {sint}\n"
                         f"🔧 Semisintético: {semi}\n\n"
-                        f"Puedes venir sin necesidad de cita y te atendemos al instante 🏎️ 💨. Si prefieres agendar, también se puede 😉"
+                        f"Puedes venir sin necesidad de cita y te atendemos al instante 🏎️💨. O dime si prefieres que agendemos una cita 😉"
                     )
                 else:
                     final = "No encontré ese vehículo en mi base de datos 🚗. Un asesor te ayudará pronto 👨‍🔧"
@@ -333,21 +341,24 @@ def webhook():
                 url_imagen = imagenes_servicios.get(servicio)
                 if url_imagen:
                     # Enviar imagen como Bot Uribe Speed
-                    enviar_mensaje_whatsapp_directo(numero, f"Esto es lo que incluye el {servicio} 👆", url_imagen)
+                    final = f"Esto es lo que incluye el {servicio} 👆 ¿Te gustaría agendar una cita? 📅"
+                    enviar_mensaje_whatsapp_directo(numero, final, url_imagen)
+                    memoria[numero]["mensajes"].append({"role": "assistant", "content": final})
                     return "OK", 200
                 else:
                     final = "No encontré ese servicio en mi catálogo. Un asesor te apoyará pronto 👨‍🔧"
+                memoria[numero]["mensajes"].append({"role": "assistant", "content": final})
 
         else:
             final = mensaje_gpt.content
-            memoria[numero]["mensajes"].append({"role": "assistant", "content": final})
 
     except Exception as e:
         print(f"❌ Error procesando mensaje: {e}")
         final = "Tuvimos un problema con tu mensaje. Intenta más tarde o espera a que un asesor te apoye 😊"
 
-    # Enviar respuesta como Bot Uribe Speed
+    # Enviar respuesta como Bot Uribe Speed y guardar en memoria el mensaje del bot
     enviar_mensaje_como_bot(conversation_sid, final)
+    memoria[numero]["mensajes"].append({"role": "assistant", "content": final})
 
     return "OK", 200
 
