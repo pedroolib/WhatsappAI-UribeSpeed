@@ -32,9 +32,6 @@ usuarios_permitidos = [
     "Joan Pedro"
 ]
 
-# Limite de dias para mantener la conversación
-limite_dias = 3
-
 # Diccionario de imágenes para servicios
 imagenes_servicios = {
     "Cambio de Aceite": "https://i.ibb.co/xS8M9vPK/CAM-AM.jpg",
@@ -230,8 +227,7 @@ def webhook():
             "ultima_interaccion": datetime.now()
         }
 
-    # Añadir mensaje a la memoria y actualizar fecha de última interacción
-    memoria[numero]["ultima_interaccion"] = datetime.now()
+    # Añadir mensaje a la memoria
     memoria[numero]["mensajes"].append({"role": "user", "content": mensaje})
 
     final = "Tuvimos un problema con tu mensaje. Intenta más tarde o espera a que un asesor te apoye 😊"
