@@ -9,6 +9,9 @@ import gspread
 import json
 from oauth2client.service_account import ServiceAccountCredentials
 from twilio.rest import Client
+import threading
+import time
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 CORS(app)
@@ -28,6 +31,9 @@ usuarios_permitidos = [
     "Bot Uribe Speed",
     "Joan Pedro"
 ]
+
+# Limite de dias para mantener la conversación
+limite_dias = 3
 
 # Diccionario de imágenes para servicios
 imagenes_servicios = {
@@ -59,8 +65,7 @@ Por ejemplo, si dice "Civic EX" o "Sentra Advance", solo toma "Civic" o "Sentra"
 
 Si no da todos los datos necesarios, pídele los que falten de forma amable, dando seguimiento a la conversación.
 
-Si pregunta algo fuera de esos temas, responde:  
-"Un asesor te responderá en un momento para darte más información sobre eso 👨‍🔧"
+Si pregunta algo fuera de esos temas, responde de forma amable diciendo que un asesor lo atenderá pronto 👨‍🔧. Puedes usar frases diferentes, pero siempre transmite que alguien del equipo lo ayudará con eso. No inventes una respuesta si no está entre los temas permitidos.
 
 Siempre responde en español, de manera clara, amable y humana. Puedes utilizar emojis para hacer más atractivo el mensaje.
 
@@ -117,31 +122,6 @@ def buscar_precio(a, m, mo, c):
             semi = row.get('ACEITE SEMISINTETICO PRECIO', 'No disponible')
             return sint, semi
     return None, None
-
-# Agregar participante WhatsApp a la conversación
-def agregar_participante_whatsapp(conversation_sid, numero_whatsapp):
-    """Agrega el número de WhatsApp como participante a la conversación"""
-    try:
-        # Verificar si ya existe el participante
-        participantes = twilio_client.conversations.v1.services(service_sid).conversations(conversation_sid).participants.list()
-
-        for participante in participantes:
-            if (participante.messaging_binding and 
-                participante.messaging_binding.get('address') == numero_whatsapp):
-                print(f"👤 Participante WhatsApp ya existe: {numero_whatsapp}")
-                return True
-
-        # Agregar participante WhatsApp
-        twilio_client.conversations.v1.services(service_sid).conversations(conversation_sid).participants.create(
-            messaging_binding_address=numero_whatsapp,
-            messaging_binding_proxy_address='whatsapp:+16084708949'
-        )
-        print(f"✅ Participante WhatsApp agregado: {numero_whatsapp}")
-        return True
-
-    except Exception as e:
-        print(f"❌ Error agregando participante WhatsApp: {e}")
-        return False
 
 # Agregar usuarios permitidos a la conversación
 def agregar_usuarios_permitidos(conversation_sid):
@@ -202,6 +182,24 @@ def enviar_mensaje_whatsapp_directo(numero, texto, mediaUrl=None):
     except Exception as e:
         print("Error enviando mensaje con WhatsApp API:", e)
 
+# Función para limpiar conversaciones antiguas
+def limpiar_memoria_inactiva():
+    while True:
+        tiempo_limite = timedelta(days=3)
+        ahora = datetime.now()
+        inactivos = []
+
+        for numero, datos in memoria.items():
+            ultima = datos.get("ultima_interaccion")
+            if ultima and ahora - ultima > tiempo_limite:
+                inactivos.append(numero)
+
+        for numero in inactivos:
+            print(f"🧹 Borrando memoria de {numero} por inactividad")
+            del memoria[numero]
+
+        time.sleep(3600)  # espera 1 hora antes de volver a revisar
+
 # Endpoint para recibir mensajes de WhatsApp
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -228,9 +226,12 @@ def webhook():
     if numero not in memoria:
         memoria[numero] = {
             "mensajes": [],
-            "esperando_asesor": False
+            "esperando_asesor": False,
+            "ultima_interaccion": datetime.now()
         }
 
+    # Añadir mensaje a la memoria y actualizar fecha de última interacción
+    memoria[numero]["ultima_interaccion"] = datetime.now()
     memoria[numero]["mensajes"].append({"role": "user", "content": mensaje})
 
     final = "Tuvimos un problema con tu mensaje. Intenta más tarde o espera a que un asesor te apoye 😊"
@@ -381,4 +382,5 @@ def generar_token():
     return make_response(jwt, 200)
 
 if __name__ == '__main__':
+    threading.Thread(target=limpiar_memoria_inactiva, daemon=True).start()
     app.run(host='0.0.0.0', port=5000)
