@@ -147,17 +147,12 @@ def buscar_precio(a, m, mo, c):
 
 # Agregar usuarios permitidos a la conversación
 def agregar_usuarios_permitidos(conversation_sid):
-    """Agrega todos los usuarios permitidos a la conversación si no están ya"""
-    for usuario in usuarios_permitidos:
+    #Agrega todos los usuarios permitidos a la conversación si no están ya
+    for usuario, clave in usuarios_permitidos.items():
         try:
-            # Verificar si ya existe el participante
             participantes = twilio_client.conversations.v1.services(service_sid).conversations(conversation_sid).participants.list()
 
-            usuario_existe = False
-            for participante in participantes:
-                if participante.identity == usuario:
-                    usuario_existe = True
-                    break
+            usuario_existe = any(p.identity == usuario for p in participantes)
 
             if not usuario_existe:
                 twilio_client.conversations.v1.services(service_sid).conversations(conversation_sid).participants.create(
@@ -184,7 +179,7 @@ def enviar_mensaje_como_bot(conversation_sid, mensaje):
         print(f"❌ Error enviando mensaje como bot: {e}")
         return False
 
-# Enviar mensaje directamente por la API de WhatsApp (no se verá en Flex)
+# Enviar mensaje directamente por la API de WhatsApp (no se verá en el inbox)
 def enviar_mensaje_whatsapp_directo(numero, texto, mediaUrl=None):
     try:
         if mediaUrl:
