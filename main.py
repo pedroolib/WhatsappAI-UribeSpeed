@@ -12,6 +12,7 @@ from twilio.rest import Client
 import threading
 import time
 from datetime import datetime, timedelta
+import pytz
 
 app = Flask(__name__)
 CORS(app)
@@ -26,11 +27,11 @@ service_sid = os.environ.get("TWILIO_CONVERSATION_SERVICE_SID")
 twilio_client = Client(twilio_account_sid, twilio_auth_token)
 
 # Usuarios permitidos en el Inbox webapp (identity)
-usuarios_permitidos = [
-    "Pedro Librado",
-    "Bot Uribe Speed",
-    "Joan Pedro"
-]
+usuarios_permitidos = {
+    "Pedro Librado" : "talleruribe1",
+    "Bot Uribe Speed" : "talleruribe1",
+    "Joan Pedro" : "talleruribe1"
+}
 
 # Diccionario de imágenes para servicios
 imagenes_servicios = {
@@ -83,7 +84,10 @@ Información del taller Uribe Speed Tune Up:
 
 - Ubicaciones:
   1. Calle Río Culiacán esquina con Av. República de Ecuador 950, Cuauhtémoc Nte, 21200 Mexicali, B.C.
+    https://maps.app.goo.gl/uXFdv2ovXKdscUde8
+  
   2. C. Granada 489, Residencial Madrid, 21353 Mexicali, B.C.
+    https://maps.app.goo.gl/7wkkkFndL7fGjpmZ9
 
 - Servicios:
   - 🛢️ Cambio de Aceite
@@ -110,8 +114,21 @@ scope = [
 creds = ServiceAccountCredentials.from_json_keyfile_name(
     'credenciales.json', scope)
 gc = gspread.authorize(creds)
-sheet = gc.open_by_key("1oW6ERLY99pOvxLibre54wfPylGb6l_wvEXz0hshBkcw").sheet1
+spreadsheet = gc.open_by_key("1oW6ERLY99pOvxLibre54wfPylGb6l_wvEXz0hshBkcw")
+sheet = spreadsheet.sheet1
 rows = sheet.get_all_records()
+sheet_eventos = spreadsheet.worksheet("Estadísticas")
+
+# Función para registrar eventos en Google Sheets
+def registrar_evento(numero, tipo_evento):
+    zona = pytz.timezone("America/Tijuana")
+    ahora = datetime.now(zona)
+    timestamp = ahora.strftime("%Y-%m-%d %H:%M")
+    try:
+        sheet_eventos.append_row([timestamp, numero, tipo_evento])
+        print(f"Evento registrado: {timestamp} | {numero} | {tipo_evento}")
+    except Exception as e:
+        print(f"Error al registrar evento en Sheets: {e}")
 
 # Memoria por usuario
 memoria = {}
@@ -218,9 +235,12 @@ def webhook():
 
     # Si el mensaje viene de un agente o del bot, ignorar
     if numero and numero in usuarios_permitidos:
-        print("Mensaje del agente/bot, no responde el bot")
+        print("Mensaje del agente, no responde el bot")
+        registrar_evento(numero, "Mensaje de agente")
         return "Mensaje del agente ignorado", 200
 
+    registrar_evento(numero, "Mensaje de cliente")
+    
     # Agregar usuarios permitidos a la conversación si no están
     try:
         agregar_usuarios_permitidos(conversation_sid)
@@ -333,8 +353,10 @@ def webhook():
                         f"🔧 Semisintético: {semi}\n\n"
                         f"Puedes venir sin necesidad de cita y te atendemos al instante 🏎️💨. O dime si prefieres que agendemos una cita 😉"
                     )
+                    registrar_evento(numero, "Cotización Enviada")
                 else:
                     final = "No encontré ese vehículo en mi base de datos 🚗. Un asesor te ayudará pronto 👨‍🔧"
+                    registrar_evento(numero, "Fallo en Cotización")
 
             elif tool_call.function.name == "detectar_servicio":
                 servicio = argumentos["servicio"]
@@ -344,16 +366,18 @@ def webhook():
                     final = f"Esto es lo que incluye el {servicio} 👆 ¿Te gustaría agendar una cita? 📅"
                     enviar_mensaje_whatsapp_directo(numero, final, url_imagen)
                     memoria[numero]["mensajes"].append({"role": "assistant", "content": final})
+                    registrar_evento(numero, "Información de Servicio")
                     return "OK", 200
                 else:
                     final = "No encontré ese servicio en mi catálogo. Un asesor te apoyará pronto 👨‍🔧"
                 memoria[numero]["mensajes"].append({"role": "assistant", "content": final})
-
         else:
             final = mensaje_gpt.content
+            registrar_evento(numero, "Mensaje del bot")
 
     except Exception as e:
         print(f"❌ Error procesando mensaje: {e}")
+        registrar_evento(numero, "Error en procesamiento")
         final = "Tuvimos un problema con tu mensaje. Intenta más tarde o espera a que un asesor te apoye 😊"
 
     # Enviar respuesta como Bot Uribe Speed y guardar en memoria el mensaje del bot
@@ -366,12 +390,16 @@ def webhook():
 @app.route('/token', methods=['GET'])
 def generar_token():
     identity = request.args.get('identity')
+    password = request.args.get('password')
 
-    if not identity:
-        return make_response('Falta identity', 400)
+    if not identity or not password:
+        return make_response('Faltan datos', 400)
 
     if identity not in usuarios_permitidos:
         return make_response('Usuario no autorizado', 403)
+
+    if usuarios_permitidos[identity] != password:
+        return make_response('Credenciales incorrectas', 401)
 
     account_sid = os.environ['TWILIO_ACCOUNT_SID']
     api_key_sid = os.environ['TWILIO_API_KEY_SID']
