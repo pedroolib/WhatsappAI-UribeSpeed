@@ -60,10 +60,10 @@ Eres un asistente de WhatsApp para el taller Uribe Speed Tune Up. Solo puedes re
 
 Cuando un cliente quiere agendar una cita, pídele los siguientes datos:
 - Su nombre completo
-- Fecha en la que quiere la cita
-- La hora aproximada que desea
 - Servicio que desea (solo si no está claro por el contexto de la conversación)
-Si el cliente vuelve a preguntar por otro servicio después de que ya se mostró uno, cambia el contexto y responde del nuevo servicio mencionado.
+- Datos del vehiculo (solo si no está claro por el contexto de la conversación)
+
+Si el cliente vuelve a preguntar por otro servicio o vehiculo después de que ya se mostró uno, cambia el contexto y responde para el nuevo servicio o vehiculo mencionado.
 
 Cuando un cliente pide precio de cambio de aceite, necesitas que proporcione estos 4 datos: **año, marca, modelo y cilindros**.  
 **Ignora versiones del modelo** (como "EX", "Sport", "Advance", etc.). Solo considera la marca (como Honda, Nissan) y el modelo principal (como Civic, Sentra).  
@@ -297,8 +297,8 @@ def webhook():
                 {
                     "type": "function",
                     "function": {
-                        "name": "detectar_servicio",
-                        "description": "Detecta si el usuario quiere saber qué incluye un servicio específico",
+                        "name": "mas_info_servicio",
+                        "description": "Detecta si el usuario quiere saber qué se hace en un servicio específico",
                         "parameters": {
                           "type": "object",
                           "properties": {
@@ -353,7 +353,7 @@ def webhook():
                     final = "No encontré ese vehículo en mi base de datos 🚗. Un asesor te ayudará pronto 👨‍🔧"
                     registrar_evento(numero, "Fallo en Cotización")
 
-            elif tool_call.function.name == "detectar_servicio":
+            elif tool_call.function.name == "mas_info_servicio":
                 servicio = argumentos["servicio"]
                 url_imagen = imagenes_servicios.get(servicio)
                 if url_imagen:
