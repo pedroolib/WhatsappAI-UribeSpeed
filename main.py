@@ -57,11 +57,18 @@ Eres un asistente de WhatsApp para el taller Uribe Speed Tune Up. Solo puedes re
 4. Cuáles son los servicios que maneja el taller y que incluye cada uno o mas informacion de cada servicio
 5. Saludos y despedidas
 6. Si el cliente quiere agendar una cita
+7. Metodos de pago del taller
 
 Cuando un cliente quiere agendar una cita, pídele los siguientes datos:
 - Su nombre completo
 - Servicio que desea (solo si no está claro por el contexto de la conversación)
 - Datos del vehiculo (solo si no está claro por el contexto de la conversación)
+- Día y hora que le gustaría agendar la cita
+- Sucursal del taller
+
+No confirmes citas ni digas que ya está agendada. Solo menciona que un asesor confirmará la disponibilidad y te dará seguimiento. 
+
+Si el cliente pregunta solo por el **precio** de un servicio como "Afinación Mayor" o cualquier otro que no sea cambio de aceite, NO uses la herramienta `mas_info_servicio`. Solo usa esa herramienta si el cliente quiere saber qué **incluye** un servicio o pide **más detalles** sobre qué se hace. Si pregunta solo por el precio, responde que un asesor lo atenderá pronto excepto si es de cambio de aceite.
 
 Si el cliente vuelve a preguntar por otro servicio o vehiculo después de que ya se mostró uno, cambia el contexto y responde para el nuevo servicio o vehiculo mencionado.
 
@@ -88,6 +95,10 @@ Información del taller Uribe Speed Tune Up:
   
   2. C. Granada 489, Residencial Madrid, 21353 Mexicali, B.C.
     https://maps.app.goo.gl/7wkkkFndL7fGjpmZ9
+
+- Métodos de pago:
+  - 💵 Efectivo
+  - 💳 Tarjeta de crédito o débito
 
 - Servicios:
   - 🛢️ Cambio de Aceite
@@ -179,23 +190,16 @@ def enviar_mensaje_como_bot(conversation_sid, mensaje):
         print(f"❌ Error enviando mensaje como bot: {e}")
         return False
 
-# Enviar mensaje directamente por la API de WhatsApp (no se verá en el inbox)
-def enviar_mensaje_whatsapp_directo(numero, texto, mediaUrl=None):
+# Enviar imagen directamente por la API de WhatsApp (no se verá en el inbox)
+def enviar_imagen_whatsapp_directo(numero, mediaUrl=None):
     try:
         if mediaUrl:
             twilio_client.messages.create(
                 from_='whatsapp:+16084708949',
                 to=numero,
-                body=texto,
                 media_url=[mediaUrl]
             )
-        else:
-            twilio_client.messages.create(
-                from_='whatsapp:+16084708949',
-                to=numero,
-                body=texto
-            )
-        print("Mensaje enviado por WhatsApp API (no visible en Flex)")
+        print("Mensaje enviado por WhatsApp API (no visible en Inbox)")
     except Exception as e:
         print("Error enviando mensaje con WhatsApp API:", e)
 
@@ -358,8 +362,9 @@ def webhook():
                 url_imagen = imagenes_servicios.get(servicio)
                 if url_imagen:
                     # Enviar imagen como Bot Uribe Speed
-                    final = f"Esto es lo que incluye el {servicio} 👆 ¿Te gustaría agendar una cita? 📅"
-                    enviar_mensaje_whatsapp_directo(numero, final, url_imagen)
+                    final = f"Esto es lo que incluye el {servicio} 🛠️ ¿Te gustaría agendar una cita? 📅"
+                    enviar_imagen_whatsapp_directo(numero, url_imagen)
+                    enviar_mensaje_como_bot(conversation_sid, final)
                     memoria[numero]["mensajes"].append({"role": "assistant", "content": final})
                     registrar_evento(numero, "Información de Servicio")
                     return "OK", 200
