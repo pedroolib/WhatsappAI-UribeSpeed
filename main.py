@@ -143,6 +143,7 @@ def registrar_evento(numero, tipo_evento):
 
 # Memoria por usuario
 memoria = {}
+temporizadores_respuesta = {}
 
 # Buscar precio en Google Sheets
 def buscar_precio(a, m, mo, c):
@@ -221,43 +222,16 @@ def limpiar_memoria_inactiva():
 
         time.sleep(3600)  # espera 1 hora antes de volver a revisar
 
-# Endpoint para recibir mensajes de WhatsApp
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    req = request.form.to_dict() or request.json
+# Función para procesar mensajes de usuario
+def procesar_mensajes_usuario(numero):
+    datos = memoria.get(numero)
+    if not datos:
+        return
 
-    numero = req.get('Author', '')
-    mensaje = req.get('Body', '')
-    conversation_sid = req.get('ConversationSid', None)
-
-    print(f"📨 Mensaje recibido de {numero} (autor: {numero}): {mensaje}")
-
-    # Si el mensaje viene de un agente o del bot, ignorar
-    if numero and numero in usuarios_permitidos:
-        print("Mensaje del agente, no responde el bot")
-        registrar_evento(numero, "Mensaje de agente")
-        return "Mensaje del agente ignorado", 200
-
-    registrar_evento(numero, "Mensaje de cliente")
-    
-    # Agregar usuarios permitidos a la conversación si no están
-    try:
-        agregar_usuarios_permitidos(conversation_sid)
-    except Exception as e:
-        print(f"❌ Error agregando usuarios permitidos: {e}")
-
-    # Inicializar memoria si no existe
-    if numero not in memoria:
-        memoria[numero] = {
-            "mensajes": [],
-            "esperando_asesor": False,
-            "ultima_interaccion": datetime.now()
-        }
-
-    # Añadir mensaje a la memoria
-    memoria[numero]["mensajes"].append({"role": "user", "content": mensaje})
-
-    final = "Tuvimos un problema con tu mensaje. Intenta más tarde o espera a que un asesor te apoye 😊"
+    conversation_sid = datos.get("conversation_sid")
+    mensajes = datos.get("mensajes", [])
+    if not mensajes:
+        return
 
     try:
         respuesta_gpt = client.chat.completions.create(
@@ -301,8 +275,8 @@ def webhook():
                 {
                     "type": "function",
                     "function": {
-                        "name": "mas_info_servicio",
-                        "description": "Detecta si el usuario quiere saber qué se hace en un servicio específico",
+                        "name": "detectar_servicio",
+                        "description": "Detecta si el usuario quiere saber qué incluye un servicio específico",
                         "parameters": {
                           "type": "object",
                           "properties": {
@@ -332,6 +306,8 @@ def webhook():
         )
 
         mensaje_gpt = respuesta_gpt.choices[0].message
+        final = mensaje_gpt.content
+        registrar_evento(numero, "Mensaje del bot")
 
         if mensaje_gpt.tool_calls:
             tool_call = mensaje_gpt.tool_calls[0]
@@ -361,30 +337,60 @@ def webhook():
                 servicio = argumentos["servicio"]
                 url_imagen = imagenes_servicios.get(servicio)
                 if url_imagen:
-                    # Enviar imagen como Bot Uribe Speed
-                    final = f"Esto es lo que incluye el {servicio} 🛠️ ¿Te gustaría agendar una cita? 📅"
                     enviar_imagen_whatsapp_directo(numero, url_imagen)
-                    enviar_mensaje_como_bot(conversation_sid, final)
-                    memoria[numero]["mensajes"].append({"role": "assistant", "content": final})
+                    final = f"Esto es lo que incluye el {servicio} 🛠️ ¿Te gustaría agendar una cita? 📅"
                     registrar_evento(numero, "Información de Servicio")
-                    return "OK", 200
                 else:
                     final = "No encontré ese servicio en mi catálogo. Un asesor te apoyará pronto 👨‍🔧"
-                memoria[numero]["mensajes"].append({"role": "assistant", "content": final})
-        else:
-            final = mensaje_gpt.content
-            registrar_evento(numero, "Mensaje del bot")
+
+        enviar_mensaje_como_bot(conversation_sid, final)
+        memoria[numero]["mensajes"].append({"role": "assistant", "content": final})
 
     except Exception as e:
-        print(f"❌ Error procesando mensaje: {e}")
-        registrar_evento(numero, "Error en procesamiento")
-        final = "Tuvimos un problema con tu mensaje. Intenta más tarde o espera a que un asesor te apoye 😊"
+        print(f"❌ Error en procesamiento diferido: {e}")
+        registrar_evento(numero, "Error en procesamiento diferido")
+        enviar_mensaje_como_bot(conversation_sid, "Tuvimos un problema con tu mensaje. Intenta más tarde o espera a que un asesor te apoye 😊")
 
-    # Enviar respuesta como Bot Uribe Speed y guardar en memoria el mensaje del bot
-    enviar_mensaje_como_bot(conversation_sid, final)
-    memoria[numero]["mensajes"].append({"role": "assistant", "content": final})
+# Endpoint para recibir mensajes de WhatsApp
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    req = request.form.to_dict() or request.json
 
-    return "OK", 200
+    numero = req.get('Author', '')
+    mensaje = req.get('Body', '')
+    conversation_sid = req.get('ConversationSid', None)
+
+    if numero and numero in usuarios_permitidos:
+        print("Mensaje del agente, no responde el bot")
+        registrar_evento(numero, "Mensaje de agente")
+        return "Mensaje del agente ignorado", 200
+
+    print(f"📨 Mensaje recibido de {numero} (autor: {numero}): {mensaje}")
+    registrar_evento(numero, "Mensaje de cliente")
+
+    # Inicializa memoria
+    if numero not in memoria:
+        memoria[numero] = {
+            "mensajes": [],
+            "esperando_asesor": False,
+            "ultima_interaccion": datetime.now(),
+            "conversation_sid": conversation_sid
+        }
+
+    # Agrega el mensaje a la lista
+    memoria[numero]["mensajes"].append({"role": "user", "content": mensaje})
+    memoria[numero]["ultima_interaccion"] = datetime.now()
+    memoria[numero]["conversation_sid"] = conversation_sid
+
+    # Reinicia temporizador
+    if numero in temporizadores_respuesta:
+        temporizadores_respuesta[numero].cancel()
+
+    t = threading.Timer(5.0, procesar_mensajes_usuario, args=(numero,))
+    temporizadores_respuesta[numero] = t
+    t.start()
+
+    return "Mensaje recibido", 200
 
 # Endpoint para generar token de Twilio desde el frontend
 @app.route('/token', methods=['GET'])
