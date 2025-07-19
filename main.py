@@ -232,7 +232,7 @@ def procesar_mensajes_usuario(numero):
 
     conversation_sid = datos.get("conversation_sid")
     mensajes = datos.get("mensajes", [])
-    mensajes = [m for m in mensajes if m.get("content")]
+
     if not mensajes:
         return
 
@@ -278,7 +278,7 @@ def procesar_mensajes_usuario(numero):
                 {
                     "type": "function",
                     "function": {
-                        "name": "detectar_servicio",
+                        "name": "mas_info_servicio",
                         "description": "Detecta si el usuario quiere saber qué incluye un servicio específico",
                         "parameters": {
                           "type": "object",
@@ -341,6 +341,7 @@ def procesar_mensajes_usuario(numero):
                 url_imagen = imagenes_servicios.get(servicio)
                 if url_imagen:
                     enviar_imagen_whatsapp_directo(numero, url_imagen)
+                    print(f"✅ Imagen enviada para el servicio {servicio}")
                     memoria[numero]["mensajes"].append({"role": "assistant", "content": "(Aquí se envió una imagen con lo que incluye el servicio)"})
                     final = f"Esto es lo que incluye el {servicio} 🛠️ ¿Te gustaría agendar una cita? 📅"
                     registrar_evento(numero, "Información de Servicio")
