@@ -343,7 +343,9 @@ def procesar_mensajes_usuario(numero):
                     enviar_imagen_whatsapp_directo(numero, url_imagen)
                     print(f"✅ Imagen enviada para el servicio {servicio}")
                     memoria[numero]["mensajes"].append({"role": "assistant", "content": "(Aquí se envió una imagen con lo que incluye el servicio)"})
-                    final = f"Esto es lo que incluye el {servicio} 🛠️ ¿Te gustaría agendar una cita? 📅"
+                    servicios_femeninos = ["Afinación Mayor", "Limpieza y Servicio al Cuerpo de Aceleración", "Limpieza de Inyectores"]
+                    articulo = "la" if servicio.lower() in servicios_femeninos else "el"
+                    final = f"Esto es lo que incluye {articulo} {servicio} 🛠️ ¿Te gustaría agendar una cita? 📅"
                     registrar_evento(numero, "Información de Servicio")
                 else:
                     final = "No encontré ese servicio en mi catálogo. Un asesor te apoyará pronto 👨‍🔧"
