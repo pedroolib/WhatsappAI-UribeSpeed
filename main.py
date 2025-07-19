@@ -13,9 +13,11 @@ import threading
 import time
 from datetime import datetime, timedelta
 import pytz
+from dotenv import load_dotenv
 
 app = Flask(__name__)
 CORS(app)
+load_dotenv()
 
 # Configura OpenAI
 client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
@@ -237,7 +239,7 @@ def procesar_mensajes_usuario(numero):
     try:
         respuesta_gpt = client.chat.completions.create(
             model="gpt-4o",
-            messages=[{"role": "system", "content": prompt_sistema}] + memoria[numero]["mensajes"],
+            messages=[{"role": "system", "content": prompt_sistema}] + mensajes,
             tools=[
                 {
                   "type": "function",
